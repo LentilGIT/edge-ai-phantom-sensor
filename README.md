@@ -1,12 +1,20 @@
 # edge-ai-phantom-sensor
 
-Real-time pump pressure and flow rate estimation using only motor current signals and edge AI — eliminating the need for dedicated sensors in deployment.
+Real-time pump pressure and flow rate estimation using only motor current 
+signals and edge AI — eliminating the need for dedicated sensors in 
+deployment.
 
 ## Overview
 
-This project demonstrates that pump discharge pressure and flow rate can be inferred in real time using only motor current signals — without installing any dedicated pressure sensors or flow meters.
+This project demonstrates that pump discharge pressure can be inferred 
+in real time using only motor current signals — without installing any 
+dedicated pressure sensors or flow meters.
 
-Traditional sensor-based monitoring requires physical installation of pressure gauges and flow meters at each pump, which adds cost, maintenance burden, and installation complexity. This system replaces them with a single current measurement and an edge AI model.
+Traditional sensor-based monitoring requires physical installation of 
+pressure gauges and flow meters at each pump, which adds cost, 
+maintenance burden, and installation complexity. This system replaces 
+them with a single current measurement and an edge AI model running 
+entirely on a microcontroller.
 
 ## Why Motor Current?
 
@@ -18,65 +26,136 @@ Three signal types were evaluated as input candidates:
 | Vibration | Accuracy depends heavily on sensor placement |
 | **Motor Current** | **Always measured at the power supply — no installation variability** |
 
-Motor current was selected for its reproducibility and universality. Any pump with an electric motor already has current flowing through a measurable point, making this approach applicable without hardware modifications.
+Motor current was selected for its reproducibility and universality. 
+Critically, the **frequency domain** of the current signal is stable across 
+temperature changes, whereas amplitude and DC current drift significantly 
+with motor temperature — making FFT-based features far more robust than 
+raw current values for long-term deployment.
 
 ## System Architecture
 ```
-Motor Current Signal
+Pump Motor Current
         │
         ▼
-[Current Probe] → [Arduino-compatible Microcontroller]
-                          │
-                    FFT Feature Extraction
-                    (Dominant band: 1,400 Hz)
-                          │
-                    Deep Neural Network
-                    (257 → 128 → 64 → 32 → 1)
-                          │
-                  Real-time Inference
-                  Pressure & Flow Rate
-                          │
-                    LTE Communication
-                          │
-                    AWS IoT Core
-                    → API Gateway
-                    → Lambda
-                    → S3
+[LT6105 Current Sensor] → [Voltage Divider] → [Sony Spresense MIC_A Pin]
+                                                        │
+                                               FFT (1024-point, Hanning)
+                                               48kHz sampling
+                                               bin1–320 (47Hz–15kHz)
+                                                        │
+                                               Deep Neural Network
+                                               (320→128→64→32→1)
+                                                        │
+                                             Real-time Pressure Output
+                                                   [MPa]
+                                                        │
+                                            ILI9341 Display (SPI)
 ```
+
+## Hardware
+
+| Component | Part | Role |
+|-----------|------|------|
+| Microcontroller | Sony Spresense (Arm Cortex-M4F) | FFT + DNN inference + display |
+| Current Sensor | LT6105 | Motor current measurement (1V/1A output) |
+| Display | ILI9341 (SPI) | Real-time pressure display |
+| Storage | SD Card | FFT data logging |
 
 ## Technical Stack
 
 | Layer | Technology |
 |-------|-----------|
-| Hardware | Arduino-compatible microcontroller (Arm Cortex-M4F) |
-| Signal Acquisition | Motor current via current probe, sampled at 48 kHz |
-| Feature Extraction | FFT — dominant frequency band identified at 1,400 Hz |
-| Model | Deep Neural Network (DNN) |
-| Explainability | SHAP analysis, Integrated Gradients |
-| Cloud | AWS IoT Core → API Gateway → Lambda → S3 |
-| Connectivity | LTE |
+| Hardware | Sony Spresense (Arm Cortex-M4F) |
+| Signal Acquisition | Motor current via LT6105, sampled at 48kHz |
+| Feature Extraction | FFT (1024-point, Hanning window) — bin1–320 (47Hz–15kHz) |
+| Model Training | Sony Neural Network Console (NNC) |
+| Model | Deep Neural Network (DNN) 320→128→64→32→1 |
+| Explainability | SHAP analysis (KernelExplainer), Weight magnitude analysis |
+| Firmware | Arduino IDE (C++) |
 
-## Results
+## Model Performance
 
 | Metric | Value |
 |--------|-------|
-| R² (pressure & flow estimation) | **0.9945** |
+| R² | **0.9946** |
+| RMSE | 3.18 kPa |
+| MAE | 2.12 kPa |
+| Max Error | 12.75 kPa |
+| Model Size | 206 KB |
 | Inference | Real-time, on-device |
 | Sensor requirement at deployment | None |
 
-SHAP analysis confirmed that the 1,400 Hz frequency band is the dominant contributor to model predictions, providing physical interpretability alongside predictive accuracy.
+## Key Finding: Weight Importance ≠ Prediction Contribution
+
+One of the most important insights from this project came from comparing 
+two analysis methods:
+
+| Analysis Method | Dominant Band | Interpretation |
+|----------------|--------------|----------------|
+| Weight Magnitude | **14–15kHz** | Strong inter-neuron connections |
+| SHAP Analysis | **1.1–1.5kHz** | Dominant actual contribution to output |
+
+The 14–15kHz band (hypothesized to be the motor driver PWM switching 
+frequency) shows large weights but small actual output contribution due 
+to weak signal amplitude. The 1.1–1.5kHz band (pump rotation frequency) 
+is the primary physical driver of pressure estimation — but this would 
+not have been identified from weight analysis alone.
+
+**Lesson:** SHAP analysis should always be examined before finalizing 
+model input ranges. Weight magnitude and prediction contribution reveal 
+fundamentally different aspects of model behavior.
+
+## Data Collection Design
+
+**Measurement range:** 0.03–0.17 MPa (15 levels, 0.01 MPa steps)  
+**Total files:** 7,500 (15 pressures × 5 rounds × 100 files)  
+**Train / Validation split:** NRD1–4 (6,000 files) / NRD5 (1,500 files)
+
+Temperature drift was identified as the primary cause of accuracy 
+degradation in earlier models. Data collection was deliberately designed 
+to mix cold-start and warm-running conditions across rounds, allowing the 
+model to learn temperature-invariant features.
+
+## Inference Without TensorFlow
+
+Due to incompatibility between Python 3.14 / Windows 11 and TensorFlow, 
+inference validation is implemented using NumPy only. Weights are 
+extracted directly from the `.pb` file using `google.protobuf` and 
+saved as `.npz` files — no TensorFlow dependency required at inference 
+time.
 
 ## Motivation
 
-Japan's industrial sector faces an accelerating labor shortage driven by demographic decline. Edge AI and remote monitoring represent the most scalable solution — yet adoption across factory floors remains remarkably low.
+Japan's industrial sector faces an accelerating labor shortage driven by 
+demographic decline. Edge AI and remote monitoring represent the most 
+scalable solution — yet adoption across factory floors remains remarkably 
+low.
 
-This project was conceived as a proof of concept: that meaningful physical quantities can be inferred from signals already present in any pumping system, without additional sensor hardware. If this approach scales, it could significantly reduce the cost and complexity of industrial condition monitoring.
+This project was conceived as a proof of concept: that meaningful 
+physical quantities can be inferred from signals already present in any 
+pumping system, without additional sensor hardware. If this approach 
+scales, it could significantly reduce the cost and complexity of 
+industrial condition monitoring.
+
+## Future Work
+
+- LTE integration with AWS IoT Core → API Gateway → Lambda → S3 
+  for remote monitoring (LTE-to-AWS pipeline separately validated 
+  in a related project)
+- Extension to flow rate estimation (dual-output model)
+- Closed-loop constant flow control using estimated flow rate as 
+  feedback signal — eliminating the need for a dedicated flow meter 
+  in control applications
+- Closed-loop constant pressure control using estimated discharge 
+  pressure as feedback signal — enabling sensorless pressure regulation
+- Generalization across pump models and operating conditions
 
 ## Development
 
 - Independently designed and developed outside of working hours
-- Total active development period: approximately 6 months
-- Conceptual development: approximately 3 years
+- Active development period: approximately 6 months
+- (Initial concept explored approximately 3 years prior;
+  revived and completed after identifying the core technical barrier)
 
 ## License
 
