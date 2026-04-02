@@ -181,8 +181,8 @@ physical sensor installation has traditionally been impractical.
 This project is built on the following Sony Spresense libraries:
 
 - [Spresense FFT Library](https://github.com/sonydevworld/spresense-arduino-compatible/blob/master/Arduino15/packages/SPRESENSE/hardware/spresense/1.0.0/libraries/SignalProcessing/src/FFT.h)
-- [Spresense Audio Library](https://developer.spresense.sony-semicon.com/spresense-api-references-arduino/Audio_8h_source)
-- [Spresense SDHCI Library](https://github.com/sonydevworld/spresense-arduino-compatible/blob/master/Arduino15/packages/SPRESENSE/hardware/spresense/1.0.0/libraries/SDHCI/src/SDHCI.h)
+- [Spresense Audio Library](https://github.com/sonydevworld/spresense-arduino-compatible/tree/master/Arduino15/packages/SPRESENSE/hardware/spresense/1.0.0/libraries/Audio)
+- [Spresense SDHCI Library](https://github.com/sonydevworld/spresense-arduino-compatible/tree/master/Arduino15/packages/SPRESENSE/hardware/spresense/1.0.0/libraries/SDHCI)
 
 ## Acknowledgements
 
