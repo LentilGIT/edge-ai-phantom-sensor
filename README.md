@@ -12,9 +12,12 @@ dedicated pressure sensors or flow meters.
 
 Traditional sensor-based monitoring requires physical installation of 
 pressure gauges and flow meters at each pump, which adds cost, 
-maintenance burden, and installation complexity. This system replaces 
-them with a single current measurement and an edge AI model running 
-entirely on a microcontroller.
+maintenance burden, and installation complexity. This is especially 
+challenging in compact equipment where physical space for sensor 
+installation is severely limited. This system replaces dedicated sensors 
+with a single current measurement and an edge AI model running entirely 
+on a microcontroller — making it applicable even where conventional 
+sensor installation is impractical.
 
 ## Why Motor Current?
 
@@ -109,12 +112,27 @@ fundamentally different aspects of model behavior.
 
 **Measurement range:** 0.03–0.17 MPa (15 levels, 0.01 MPa steps)  
 **Total files:** 7,500 (15 pressures × 5 rounds × 100 files)  
-**Train / Validation split:** NRD1–4 (6,000 files) / NRD5 (1,500 files)
+**Train / Validation split:** TEST1–4 (6,000 files) / TEST5 (1,500 files)
 
 Temperature drift was identified as the primary cause of accuracy 
 degradation in earlier models. Data collection was deliberately designed 
 to mix cold-start and warm-running conditions across rounds, allowing the 
 model to learn temperature-invariant features.
+
+## Data
+
+FFT CSV data used for SHAP analysis is included as `data/TEST5.zip`.  
+Unzip before running the analysis scripts:
+```
+data/
+└── TEST5/
+    └── *.csv
+```
+
+The Python scripts assume the following relative path:
+```python
+CSV_FOLDER = "../data/TEST5"
+```
 
 ## Inference Without TensorFlow
 
@@ -135,7 +153,8 @@ This project was conceived as a proof of concept: that meaningful
 physical quantities can be inferred from signals already present in any 
 pumping system, without additional sensor hardware. If this approach 
 scales, it could significantly reduce the cost and complexity of 
-industrial condition monitoring.
+industrial condition monitoring — including in compact equipment where 
+physical sensor installation has traditionally been impractical.
 
 ## Future Work
 
@@ -156,6 +175,21 @@ industrial condition monitoring.
 - Active development period: approximately 6 months
 - (Initial concept explored approximately 3 years prior;
   revived and completed after identifying the core technical barrier)
+
+## Libraries & References
+
+This project is built on the following Sony Spresense libraries:
+
+- [Spresense FFT Library](https://github.com/sonydevworld/spresense-arduino-compatible/blob/master/Arduino15/packages/SPRESENSE/hardware/spresense/1.0.0/libraries/SignalProcessing/src/FFT.h)
+- [Spresense Audio Library](https://developer.spresense.sony-semicon.com/spresense-api-references-arduino/Audio_8h_source)
+- [Spresense SDHCI Library](https://github.com/sonydevworld/spresense-arduino-compatible/blob/master/Arduino15/packages/SPRESENSE/hardware/spresense/1.0.0/libraries/SDHCI/src/SDHCI.h)
+
+## Acknowledgements
+
+Special thanks to the engineers at Sony Semiconductor Solutions for 
+their technical guidance on the Spresense platform and for their 
+encouragement to pursue edge AI development in industrial applications. 
+Their feedback was instrumental in validating the direction of this work.
 
 ## License
 
