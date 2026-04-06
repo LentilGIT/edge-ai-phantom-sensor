@@ -1,27 +1,59 @@
 # edge-ai-phantom-sensor
 
-Real-time pump pressure and flow rate estimation using only motor current 
-signals and edge AI — eliminating the need for dedicated sensors in 
-deployment.
+Real-time pump pressure estimation using only motor current signals and 
+edge AI — eliminating the need for dedicated sensors in deployment.
 
-## Overview
+## Project Overview
 
-This project demonstrates that pump discharge pressure can be inferred 
-in real time using only motor current signals — without installing any 
-dedicated pressure sensors or flow meters.
+This repository documents the full development journey of a sensorless 
+pump pressure estimation system, from initial prototype to deployed 
+edge AI solution.
 
-Traditional sensor-based monitoring requires physical installation of 
-pressure gauges and flow meters at each pump, which adds cost, 
-maintenance burden, and installation complexity. This is especially 
-challenging in compact equipment where physical space for sensor 
-installation is severely limited. This system replaces dedicated sensors 
-with a single current measurement and an edge AI model running entirely 
-on a microcontroller — making it applicable even where conventional 
-sensor installation is impractical.
+The core idea: pump discharge pressure can be inferred in real time 
+using only motor current signals — without installing any dedicated 
+pressure sensors or flow meters. This is especially valuable in compact 
+equipment where physical sensor installation is impractical.
+
+## Two Implementation Versions
+
+### v1_INA219 — Initial Prototype (TI INA219)
+
+- **Sensor**: Texas Instruments INA219 (I2C interface, 0x40)
+- **Input**: 257-dimensional (DC mean + Peak-to-Peak + FFT bin1–255)
+- **Model**: DNN 257→128→64→32→1
+- **Result**: R²=0.9992 under controlled conditions
+- **Limitation**: DC mean and Peak-to-Peak dominate predictions 
+  (confirmed by SHAP analysis) — these features drift with motor 
+  temperature, causing accuracy degradation during extended operation
+
+### v2_LT6105 — Primary Version (Analog Devices LT6105)
+
+- **Sensor**: LT6105 current sense amplifier via Spresense MIC_A pin
+- **Input**: 320-dimensional (FFT bin1–320 only — no DC or P-P)
+- **Model**: DNN 320→128→64→32→1
+- **Result**: R²=0.9946, RMSE=3.18 kPa across diverse conditions
+- **Improvement**: FFT frequency features are temperature-stable, 
+  making this version robust across cold-start and warm-running 
+  conditions
+
+## Why the Transition from v1 to v2?
+
+SHAP analysis on v1 revealed the root cause of its limitations:
+
+| Version | Top Feature | SHAP Value | Temperature Stable? |
+|---------|------------|------------|-------------------|
+| v1 INA219 | Peak-to-Peak [mA] | 0.046 | ❌ No |
+| v1 INA219 | DC mean [mA] | 0.035 | ❌ No |
+| v2 LT6105 | 1.172 kHz (FFT) | 0.163 | ✅ Yes |
+| v2 LT6105 | 1.125 kHz (FFT) | 0.134 | ✅ Yes |
+
+v1 achieved high accuracy under controlled conditions but relied on 
+DC current and amplitude features that drift with motor temperature. 
+v2 was redesigned to use only FFT frequency features — validated by 
+SHAP to be temperature-invariant — achieving robust performance across 
+real operating conditions.
 
 ## Why Motor Current?
-
-Three signal types were evaluated as input candidates:
 
 | Signal | Problem |
 |--------|---------|
@@ -29,33 +61,27 @@ Three signal types were evaluated as input candidates:
 | Vibration | Accuracy depends heavily on sensor placement |
 | **Motor Current** | **Always measured at the power supply — no installation variability** |
 
-Motor current was selected for its reproducibility and universality. 
-Critically, the **frequency domain** of the current signal is stable across 
-temperature changes, whereas amplitude and DC current drift significantly 
-with motor temperature — making FFT-based features far more robust than 
-raw current values for long-term deployment.
+Critically, the **frequency domain** of the current signal is stable 
+across temperature changes, whereas amplitude and DC current drift 
+significantly — making FFT-based features far more robust for 
+long-term deployment.
 
-## System Architecture
-```
-Pump Motor Current
-        │
-        ▼
-[LT6105 Current Sensor] → [Voltage Divider] → [Sony Spresense MIC_A Pin]
-                                                        │
-                                               FFT (1024-point, Hanning)
-                                               48kHz sampling
-                                               bin1–320 (47Hz–15kHz)
-                                                        │
-                                               Deep Neural Network
-                                               (320→128→64→32→1)
-                                                        │
-                                             Real-time Pressure Output
-                                                   [MPa]
-                                                        │
-                                            ILI9341 Display (SPI)
-```
+## Repository Structure
 
-## Hardware
+edge-ai-phantom-sensor/
+├── v1_INA219/
+│   ├── sketches/          — Arduino C++ firmware (INA219 version)
+│   ├── analysis/          — SHAP analysis, model weights, result plot
+│   └── data/              — INA219_valid.zip (320 CSV files)
+│
+└── v2_LT6105/
+├── sketches/          — Arduino C++ firmware (LT6105 version)
+├── analysis/          — SHAP analysis (320bin & 512bin), model weights
+└── data/              — TEST5.zip (1,500 CSV files)
+
+## v2_LT6105 — Technical Details
+
+### Hardware
 
 | Component | Part | Role |
 |-----------|------|------|
@@ -64,75 +90,48 @@ Pump Motor Current
 | Display | ILI9341 (SPI) | Real-time pressure display |
 | Storage | SD Card | FFT data logging |
 
-## Technical Stack
+### Technical Stack
 
 | Layer | Technology |
 |-------|-----------|
-| Hardware | Sony Spresense (Arm Cortex-M4F) |
 | Signal Acquisition | Motor current via LT6105, sampled at 48kHz |
 | Feature Extraction | FFT (1024-point, Hanning window) — bin1–320 (47Hz–15kHz) |
 | Model Training | Sony Neural Network Console (NNC) |
-| Model | Deep Neural Network (DNN) 320→128→64→32→1 |
+| Model | DNN 320→128→64→32→1 |
 | Explainability | SHAP analysis (KernelExplainer), Weight magnitude analysis |
 | Firmware | Arduino IDE (C++) |
 
-## Model Performance
+### Model Performance
 
-| Metric | Value |
-|--------|-------|
-| R² | **0.9946** |
-| RMSE | 3.18 kPa |
-| MAE | 2.12 kPa |
-| Max Error | 12.75 kPa |
-| Model Size | 206 KB |
-| Inference | Real-time, on-device |
-| Sensor requirement at deployment | None |
+| Metric | v1 INA219 | v2 LT6105 |
+|--------|-----------|-----------|
+| R² | 0.9992 (controlled) | **0.9946 (diverse conditions)** |
+| RMSE | 3.1 kPa | **3.18 kPa** |
+| MAE | 2.4 kPa | **2.12 kPa** |
+| Model Size | ~50 KB | **206 KB** |
+| Temperature Robust | ❌ | **✅** |
 
-## Key Finding: Weight Importance ≠ Prediction Contribution
-
-One of the most important insights from this project came from comparing 
-two analysis methods:
+### Key Finding: Weight Importance ≠ Prediction Contribution
 
 | Analysis Method | Dominant Band | Interpretation |
 |----------------|--------------|----------------|
 | Weight Magnitude | **14–15kHz** | Strong inter-neuron connections |
 | SHAP Analysis | **1.1–1.5kHz** | Dominant actual contribution to output |
 
-The 14–15kHz band (hypothesized to be the motor driver PWM switching 
-frequency) shows large weights but small actual output contribution due 
-to weak signal amplitude. The 1.1–1.5kHz band (pump rotation frequency) 
-is the primary physical driver of pressure estimation — but this would 
-not have been identified from weight analysis alone.
-
 **Lesson:** SHAP analysis should always be examined before finalizing 
 model input ranges. Weight magnitude and prediction contribution reveal 
 fundamentally different aspects of model behavior.
 
-## Data Collection Design
+### Data Collection Design (v2)
 
 **Measurement range:** 0.03–0.17 MPa (15 levels, 0.01 MPa steps)  
 **Total files:** 7,500 (15 pressures × 5 rounds × 100 files)  
 **Train / Validation split:** TEST1–4 (6,000 files) / TEST5 (1,500 files)
 
 Temperature drift was identified as the primary cause of accuracy 
-degradation in earlier models. Data collection was deliberately designed 
-to mix cold-start and warm-running conditions across rounds, allowing the 
-model to learn temperature-invariant features.
-
-## Data
-
-FFT CSV data used for SHAP analysis is included as `data/TEST5.zip`.  
-Unzip before running the analysis scripts:
-```
-data/
-└── TEST5/
-    └── *.csv
-```
-
-The Python scripts assume the following relative path:
-```python
-CSV_FOLDER = "../data/TEST5"
-```
+degradation in v1. Data collection for v2 was deliberately designed 
+to mix cold-start and warm-running conditions, allowing the model to 
+learn temperature-invariant features.
 
 ## Inference Without TensorFlow
 
@@ -144,45 +143,45 @@ time.
 
 ## Motivation
 
-Japan's industrial sector faces an accelerating labor shortage driven by 
-demographic decline. Edge AI and remote monitoring represent the most 
-scalable solution — yet adoption across factory floors remains remarkably 
-low.
+Japan's industrial sector faces an accelerating labor shortage driven 
+by demographic decline. Edge AI and remote monitoring represent the 
+most scalable solution — yet adoption across factory floors remains 
+remarkably low.
 
 This project was conceived as a proof of concept: that meaningful 
-physical quantities can be inferred from signals already present in any 
-pumping system, without additional sensor hardware. If this approach 
-scales, it could significantly reduce the cost and complexity of 
-industrial condition monitoring — including in compact equipment where 
-physical sensor installation has traditionally been impractical.
+physical quantities can be inferred from signals already present in 
+any pumping system, without additional sensor hardware. If this 
+approach scales, it could significantly reduce the cost and complexity 
+of industrial condition monitoring — including in compact equipment 
+where physical sensor installation has traditionally been impractical.
 
 ## Future Work
 
-- LTE integration with AWS IoT Core → API Gateway → Lambda → S3 
-  for remote monitoring (LTE-to-AWS pipeline separately validated 
+- LTE integration with AWS IoT Core → API Gateway → Lambda → S3
+  for remote monitoring (LTE-to-AWS pipeline separately validated
   in a related project)
 - Extension to flow rate estimation (dual-output model)
-- Closed-loop constant flow control using estimated flow rate as 
-  feedback signal — eliminating the need for a dedicated flow meter 
-  in control applications
-- Closed-loop constant pressure control using estimated discharge 
-  pressure as feedback signal — enabling sensorless pressure regulation
+- Closed-loop constant flow control using estimated flow rate as
+  feedback signal
+- Closed-loop constant pressure control using estimated discharge
+  pressure as feedback signal
 - Generalization across pump models and operating conditions
 
 ## Development
 
 - Independently designed and developed outside of working hours
 - Active development period: approximately 6 months
-- (Initial concept explored approximately 3 years prior;
-  revived and completed after identifying the core technical barrier)
+  (v1 INA219 prototype: December 2024;
+   v2 LT6105 deployed version: completed 2025)
+- Initial concept explored approximately 3 years prior;
+  revived and completed after identifying the core technical barrier
 
 ## Libraries & References
-
-This project is built on the following Sony Spresense libraries:
 
 - [Spresense FFT Library](https://github.com/sonydevworld/spresense-arduino-compatible/blob/master/Arduino15/packages/SPRESENSE/hardware/spresense/1.0.0/libraries/SignalProcessing/src/FFT.h)
 - [Spresense Audio Library](https://github.com/sonydevworld/spresense-arduino-compatible/tree/master/Arduino15/packages/SPRESENSE/hardware/spresense/1.0.0/libraries/Audio)
 - [Spresense SDHCI Library](https://github.com/sonydevworld/spresense-arduino-compatible/tree/master/Arduino15/packages/SPRESENSE/hardware/spresense/1.0.0/libraries/SDHCI)
+- [TI INA219 Product Page](https://www.ti.com/product/INA219)
 
 ## Acknowledgements
 
